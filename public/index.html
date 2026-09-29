@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment Tester</title>
+<style>
+  :root { --bg:#f4f6fa; --card:#fff; --text:#1c2333; --muted:#6b7385; --line:#e3e7ef; --accent:#2f6bff;
+          --ok:#12805c; --okbg:#e3f6ee; --warn:#9a6700; --warnbg:#fff4d6; --bad:#b42318; --badbg:#fde8e6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1420; --card:#181f2f; --text:#e8ecf5; --muted:#94a0b8; --line:#2a3348; --accent:#5b8cff;
+            --ok:#5fd3a5; --okbg:#12332a; --warn:#f0c04d; --warnbg:#3a2f10; --bad:#ff8f85; --badbg:#3a1a17; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:18px; }
+  h2 { font-size:15px; margin:0 0 12px; }
+  form { display:flex; gap:10px; flex-wrap:wrap; }
+  input, select, button { font:inherit; padding:10px 12px; border-radius:8px; border:1px solid var(--line);
+                          background:var(--bg); color:var(--text); }
+  input { flex:1 1 120px; min-width:0; }
+  button { background:var(--accent); color:#fff; border-color:var(--accent); cursor:pointer; font-weight:600; }
+  button:disabled { opacity:.6; cursor:wait; }
+  button.ghost { background:transparent; color:var(--accent); }
+  .banner { padding:10px 12px; border-radius:8px; margin-bottom:18px; display:none; }
+  .banner.show { display:block; }
+  .banner.PAID { background:var(--okbg); color:var(--ok); }
+  .banner.PENDING, .banner.info { background:var(--warnbg); color:var(--warn); }
+  .banner.FAILED, .banner.error { background:var(--badbg); color:var(--bad); }
+  .head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .head h2 { margin:0; }
+  ul { list-style:none; margin:0; padding:0; }
+  li { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0; border-top:1px solid var(--line); }
+  li:first-child { border-top:0; }
+  .amt { font-weight:600; }
+  .id { color:var(--muted); font-size:12px; font-family:ui-monospace,monospace; }
+  .pill { font-size:12px; font-weight:600; padding:2px 10px; border-radius:99px; }
+  .pill.PAID { background:var(--okbg); color:var(--ok); }
+  .pill.PENDING { background:var(--warnbg); color:var(--warn); }
+  .pill.FAILED { background:var(--badbg); color:var(--bad); }
+  .empty { color:var(--muted); padding:8px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Payment Tester</h1>
+  <p class="sub">Safepay sandbox &middot; test payments only</p>
+
+  <div id="banner" class="banner"></div>
+
+  <section class="card">
+    <h2>New payment</h2>
+    <form id="form">
+      <input id="amount" type="number" min="1" step="0.01" value="10" required aria-label="Amount">
+      <select id="currency" aria-label="Currency">
+        <option>PKR</option>
+        <option>USD</option>
+      </select>
+      <button id="pay" type="submit">Pay now</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="head">
+      <h2>Recent payments</h2>
+      <button id="refresh" class="ghost" type="button">Refresh</button>
+    </div>
+    <ul id="list"></ul>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function banner(text, kind) {
+  const el = $("banner");
+  el.textContent = text;
+  el.className = "banner show " + kind;
+}
+
+async function loadList() {
+  try {
+    const res = await fetch("/payments");
+    const payments = await res.json();
+    const list = $("list");
+    list.replaceChildren();
+    if (!payments.length) {
+      list.innerHTML = '<li class="empty">No payments yet.</li>';
+      return;
+    }
+    for (const p of payments) {
+      const li = document.createElement("li");
+      const left = document.createElement("div");
+      const amt = document.createElement("div");
+      amt.className = "amt";
+      amt.textContent = p.amount + " " + p.currency;
+      const id = document.createElement("div");
+      id.className = "id";
+      id.textContent = p.orderId;
+      left.append(amt, id);
+      const pill = document.createElement("span");
+      pill.className = "pill " + p.status;
+      pill.textContent = p.status;
+      li.append(left, pill);
+      list.append(li);
+    }
+  } catch {
+    banner("Could not load payments. Is the server running?", "error");
+  }
+}
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("pay");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/payments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: Number($("amount").value), currency: $("currency").value })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Payment failed");
+    location.href = data.checkoutUrl;
+  } catch (err) {
+    banner(err.message, "error");
+    btn.disabled = false;
+  }
+});
+
+$("refresh").addEventListener("click", loadList);
+
+(async function init() {
+  const q = new URLSearchParams(location.search);
+  if (q.get("cancelled")) banner("Payment cancelled.", "info");
+  if (q.get("order")) {
+    const res = await fetch("/payments/" + encodeURIComponent(q.get("order")));
+    if (res.ok) {
+      const p = await res.json();
+      banner("Payment " + p.amount + " " + p.currency + " is " + p.status + ".", p.status);
+    }
+  }
+  loadList();
+})();
+</script>
+</body>
+</html>
