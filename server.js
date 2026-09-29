@@ -1,28 +1,25 @@
 require("dotenv").config();
 
-console.log(
-    "Safepay public key loaded:",
-    !!process.env.SAFEPAY_PUBLIC_KEY
-);
-
-
 const express = require("express");
-const db = require("./config/db");
-
+const store = require("./models/paymentStore");
 const paymentRoutes = require("./routes/paymentroutes");
 
 const app = express();
 
-app.use(express.json());
+// Keep the raw body: webhook signatures are computed over it.
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
+
+app.use(express.static(require("path").join(__dirname, "public")));
 
 app.use("/", paymentRoutes);
 
-app.get("/", (req, res) => {
-    res.json({
-        message: "Payment API is running"
-    });
+app.use((err, req, res, next) => {
+    console.error(err);
+    res.status(err.status || 500).json({ error: "Request failed" });
 });
 
-app.listen(5000, () => {
-    console.log("Server running on port 5000");
+const PORT = process.env.PORT || 5000;
+
+store.init().then(() => {
+    app.listen(PORT, () => console.log("Server running on port " + PORT));
 });
