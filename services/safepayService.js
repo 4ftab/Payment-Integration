@@ -13,8 +13,6 @@ const API_URL =
  * Step 1 of checkout: ask Safepay for a "tracker" (a payment session).
  * This is the same call you already had, and it works for you, so we keep it.
  */
-let workingSecretName = null;
-
 async function createTracker(amount, currency) {
     const response = await axios.post(
         `${API_URL}/order/v1/init`,
@@ -46,55 +44,18 @@ async function createTracker(amount, currency) {
  * Returns one of: "PAID" | "FAILED" | "EXPIRED" | "PENDING"
  */
 async function fetchStatus(tracker) {
-    const url = `${API_URL}/reporter/api/v1/payments/${encodeURIComponent(tracker)}`;
+    // GET /order/v1/{tracker} is public for a tracker token and needs no secret.
+    // (/reporter/api/v1/payments/{tracker} cannot find trackers made via
+    //  /order/v1/init, even with the matching secret key.)
+    const response = await axios.get(
+        `${API_URL}/order/v1/${encodeURIComponent(tracker)}`,
+        { timeout: 15000 }
+    );
 
-    // This endpoint requires a secret in the X-SFPY-MERCHANT-SECRET header.
-    // Safepay's error text calls it the "merchant webhook secret", but its docs
-    // say "secret key", so we try both of your secrets and remember the winner.
-    const candidates = [
-        ["SAFEPAY_WEBHOOK_SECRET", process.env.SAFEPAY_WEBHOOK_SECRET],
-        ["SAFEPAY_SECRET_KEY", process.env.SAFEPAY_SECRET_KEY]
-    ].filter(([, value]) => value);
-
-    if (workingSecretName) {
-        candidates.sort((a) => (a[0] === workingSecretName ? -1 : 1));
-    }
-
-    let response;
-    const failures = [];
-
-    for (const [name, value] of candidates) {
-        try {
-            response = await axios.get(url, {
-                headers: { "X-SFPY-MERCHANT-SECRET": value },
-                timeout: 15000
-            });
-            if (workingSecretName !== name) {
-                workingSecretName = name;
-                console.log(`Safepay accepted ${name} for tracker lookups`);
-            }
-            break;
-        } catch (err) {
-            const d = err.response?.data ?? err.message;
-            failures.push(`${name}: ${typeof d === "string" ? d : JSON.stringify(d)}`);
-        }
-    }
-
-    if (!response) {
-        throw new Error(
-            candidates.length
-                ? "Safepay rejected every secret. " + failures.join(" | ")
-                : "Neither SAFEPAY_WEBHOOK_SECRET nor SAFEPAY_SECRET_KEY is set in .env"
-        );
-    }
-
-    // The docs show the state at data.tracker.state in one place and
-    // data.state in another, so we accept both.
     const data = response.data?.data;
-    const state = String(data?.tracker?.state || data?.state || "").toUpperCase();
+    const state = String(data?.state || data?.tracker?.state || "").toUpperCase();
 
     if (!state) {
-        // Unknown shape: print it once so you can see what Safepay really sent.
         console.warn("Safepay: no tracker state found. Body was:",
             JSON.stringify(response.data));
     }
@@ -120,8 +81,8 @@ function buildCheckoutUrl({ tracker, orderId, baseUrl }) {
         beacon: tracker,
         source: "custom",
         order_id: orderId,
-        redirect_url: `${baseUrl}/payments/success`,
-        cancel_url: `${baseUrl}/payments/cancel`
+        redirect_url: process.env.SAFEPAY_REDIRECT_URL || `${baseUrl}/payments/success`,
+        cancel_url: process.env.SAFEPAY_CANCEL_URL || `${baseUrl}/payments/cancel`
     });
 
     return `${API_URL}/checkout/pay?${params}`;
